@@ -1,6 +1,14 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+import matplotlib.lines as mlines
+from matplotlib.colors import BoundaryNorm
+import os
+import json
+
+# Need some more stuff for path planning, paths taken etc.
+# Will add logs soon to abstract then I can put this in here
 
 class DataProcessing:
     def __init__(self):
@@ -9,12 +17,28 @@ class DataProcessing:
         # self.process_time_data()
         self.process_overlap_data()
 
-    def process_overlap_data(self):
-        csv_file_path = '/home/student36/Dissertation/AbstractModel/DissertationAbtractModel/dissertation_redundancy_record.csv'
 
-        # Fixed Grid Dimensions
-        HEIGHT = 55
-        WIDTH = 195
+    # Okay this needs changing
+    # Need to have two graphs made, one for each sim and line/bar for the overlap across them all
+    # Easier to copy sim config across each time than try to pull out of csv
+    # Need to change the title to be more self explanatory
+    def process_overlap_data(self):
+        csv_file_path = '/home/student36/Dissertation/AbstractModel/DissertationAbtractModel/dissertation_redundancy_record_DJI_full_comms.csv'
+
+        # ==========================================
+        # LOAD LAYOUT FROM AreaLayout.JSON
+        # ==========================================
+        current_dir = os.path.dirname(__file__) if '__file__' in locals() else '.'
+        json_path = os.path.join(current_dir, 'AreaLayout.JSON')
+        
+        if not os.path.exists(json_path):
+            json_path = '/home/student36/Dissertation/AbstractModel/DissertationAbtractModel/AreaLayout.JSON'
+
+        with open(json_path) as f:
+            layout_data = json.load(f)
+
+        HEIGHT = int(layout_data["fullarea"]["height"])
+        WIDTH = int(layout_data["fullarea"]["width"])
 
         # Read CSV without a fixed column count (handles varying row lengths)
         with open(csv_file_path, 'r') as f:
@@ -22,26 +46,17 @@ class DataProcessing:
 
         # Loop through each run/row in the file
         for row_idx, line in enumerate(lines):
-            # Parse line into raw values
             row = line.strip().split(',')
             if not row or row[0] == '':
                 continue
                 
-            # 1. Read num_uavs dynamically from index 0
             num_uavs = int(row[0])
-            
-            # 2. Compute exact array length for THIS specific row
             array_length = HEIGHT * WIDTH * num_uavs
-            
-            # 3. Slice and reshape the 3D array dynamically
             array_data = np.array(row[1 : 1 + array_length], dtype=float)
             overlap_area = array_data.reshape((HEIGHT, WIDTH, num_uavs))
             
-            # 4. Extract uav_params from the remaining elements at the end
             uav_params_raw = row[1 + array_length :]
             
-            # Extract parameters (adjust indices if your JSON structure differs slightly)
-            # [StartPosition, ReleaseDelay, TopSpeed, DangerSpeed, StartSpeed, LIDARDistance, BatteryLife, Acceleration, WallDangerZone, ChargeTime]
             top_speed = uav_params_raw[2]
             lidar_dist = int(float(uav_params_raw[5]))
             battery_life = int(float(uav_params_raw[6]))
@@ -50,7 +65,6 @@ class DataProcessing:
             # ==========================================
             # REDUNDANCY METRICS
             # ==========================================
-            
             total_scans = np.sum(overlap_area, axis=2)
             unique_uavs_per_cell = np.sum((overlap_area > 0).astype(int), axis=2)
             
@@ -61,60 +75,120 @@ class DataProcessing:
             cross_uav_percent = (cross_uav_cells / mapped_cells) * 100 if mapped_cells > 0 else 0
             
             # ==========================================
-            # PLOTTING & DYNAMIC SAVING
+            # PLOTTING & DYNAMIC SAVING (Single Plot)
             # ==========================================
-            
-            fig, axes = plt.subplots(2, 1, figsize=(12, 7))
+            fig, ax = plt.subplots(figsize=(14, 5))
             
             title_text = (
-                f"Scan Redundancy Analysis ({num_uavs} UAVs)\n"
+                f"Cross-UAV Overlap Analysis ({num_uavs} UAVs)\n"
                 f"(Battery Life: {battery_life}s, LIDAR: {lidar_dist}m, Speed: {top_speed}m/s, Accel: {accel}m/s²)\n"
                 f"Global Redundancy Ratio: {global_redundancy_ratio:.2f}x | Shared Coverage: {cross_uav_percent:.1f}%"
             )
-            fig.suptitle(title_text, fontsize=11, fontweight='bold', y=0.98)
+            ax.set_title(title_text, fontsize=10, fontweight='bold', pad=12)
             
-            # Subplot 1: Total Scan Heatmap
-            im1 = axes[0].imshow(total_scans, cmap='YlOrRd', aspect='equal')
-            axes[0].set_title("Total Scan Count Density per Cell", fontsize=10)
-            fig.colorbar(im1, ax=axes[0], label='Scans')
+            # ==========================================
+            # DISCRETE COLOR MAPPING
+            # ==========================================
+            max_uavs_in_grid = max(int(np.max(unique_uavs_per_cell)), num_uavs)
             
-            # Subplot 2: Cross-UAV Overlap
-            im2 = axes[1].imshow(unique_uavs_per_cell, cmap='viridis', aspect='equal')
-            axes[1].set_title("Cross-UAV Overlap (Number of Unique UAVs per Cell)", fontsize=10)
-            fig.colorbar(im2, ax=axes[1], label='Unique UAVs')
+            cmap = plt.get_cmap('YlOrRd', max_uavs_in_grid + 1)
+            bounds = np.arange(-0.5, max_uavs_in_grid + 1.5, 1)
+            norm = BoundaryNorm(bounds, cmap.N)
             
-            plt.tight_layout(rect=[0, 0, 1, 0.93])
+            im = ax.imshow(unique_uavs_per_cell, cmap=cmap, norm=norm, aspect='equal')
             
-            # Save chart uniquely per run
-            output_filename = f"redundancy_run{row_idx+1}_uavs{num_uavs}_bat{battery_life}_lidar{lidar_dist}.png"
-            plt.savefig(output_filename, dpi=300)
-            plt.close()  # Close plot to free memory during loop
+            # ==========================================
+            # OVERLAY WALLS & DOORS IN BLACK FROM JSON
+            # ==========================================
+            doors_set = set(tuple(d) for d in layout_data["doors"])
+            for wall in layout_data["walls"]:
+                x_start, x_end = min(wall["start"][0], wall["end"][0]), max(wall["start"][0], wall["end"][0])
+                y_start, y_end = min(wall["start"][1], wall["end"][1]), max(wall["start"][1], wall["end"][1])
+                
+                if x_start == x_end:  # Vertical wall
+                    x = x_start
+                    ymin, ymax = y_start, y_end
+                    segment_doors = sorted([y for (dx, y) in doors_set if dx == x and ymin <= y <= ymax])
+                    
+                    current_y = ymin
+                    for dy in segment_doors:
+                        if dy > current_y:
+                            ax.plot([x, x], [current_y, dy], color='black', linewidth=1.5)
+                        current_y = dy + 1
+                    if current_y <= ymax:
+                        ax.plot([x, x], [current_y, ymax], color='black', linewidth=1.5)
+                        
+                elif y_start == y_end:  # Horizontal wall
+                    y = y_start
+                    xmin, xmax = x_start, x_end
+                    segment_doors = sorted([x for (x, dy) in doors_set if dy == y and xmin <= x <= xmax])
+                    
+                    current_x = xmin
+                    for dx in segment_doors:
+                        if dx > current_x:
+                            ax.plot([current_x, dx], [y, y], color='black', linewidth=1.5)
+                        current_x = dx + 1
+                    if current_x <= xmax:
+                        ax.plot([current_x, xmax], [y, y], color='black', linewidth=1.5)
+
+            # ==========================================
+            # HIGHLIGHT START POSITION [1, 1]
+            # ==========================================
+            ax.scatter([1], [1], color='cyan', marker='X', s=120, zorder=5, edgecolor='black', linewidth=1)
+
+            # ==========================================
+            # BUILD NORMAL DISCRETE LEGEND
+            # ==========================================
+            legend_handles = []
+            for i in range(max_uavs_in_grid + 1):
+                color = cmap(norm(i))
+                label = f"{i} UAV{'s' if i != 1 else ''}"
+                legend_handles.append(mpatches.Patch(color=color, label=label, edgecolor='gray', linewidth=0.5))
+
+            start_handle = mlines.Line2D([], [], color='cyan', marker='X', linestyle='None',
+                                         markersize=8, markeredgecolor='black', markeredgewidth=1,
+                                         label='Start Position [1, 1]')
+            legend_handles.append(start_handle)
+
+            ax.legend(handles=legend_handles, bbox_to_anchor=(1.01, 1), loc='upper left', fontsize=8, frameon=True)
+
+            ax.set_xlim(0, WIDTH)
+            ax.set_ylim(HEIGHT, 0)  # Ensures proper top-down grid alignment matching array bounds
+            ax.set_xlabel("X (Grid Columns)", fontsize=9)
+            ax.set_ylabel("Y (Grid Rows)", fontsize=9)
+
+            plt.tight_layout()
+            
+            # Save chart uniquely per run (bbox_inches='tight' ensures external legend isn't clipped)
+            output_filename = f"overlap_run{row_idx+1}_uavs{num_uavs}_bat{battery_life}_lidar{lidar_dist}.png"
+            # plt.savefig(output_filename, dpi=300, bbox_inches='tight')
+            # plt.close()
+            plt.show()
             
             print(f"Processed Run {row_idx+1} ({num_uavs} UAVs) -> Saved as: {output_filename}")
 
     def process_time_data(self):
-        # 1. Load the CSV file directly
-        csv_file_path = '/home/student36/Dissertation/AbstractModel/DissertationAbtractModel/dissertation_time_record.csv'
+        csv_file_path = '/home/student36/Dissertation/AbstractModel/DissertationAbtractModel/dissertation_time_record_DJI_full_comms.csv'
+        # Read headerless CSV; pandas assigns integer columns 0, 1, 2... automatically
+        df = pd.read_csv(csv_file_path, header=None)
 
-        # If your CSV doesn't have headers, pass header=None and assign names:
-        # names=['NumUAVS', 'TimeElapsed', 'StartPosition', 'ReleaseDelay', 'TopSpeed', 
-        #        'DangerSpeed', 'StartSpeed', 'LIDARDistance', 'BatteryLife', 'Acceleration', 
-        #        'WallDangerZone', 'ChargeTime']
-        df = pd.read_csv(csv_file_path)
+        # Ensure proper numeric data types using integer column indices
+        df[0] = df[0].astype(int)     # NumUAVS (Column 0)
+        df[1] = df[1].astype(float)   # TimeElapsed (Column 1)
 
-        # Ensure proper numeric data types
-        df['NumUAVS'] = df['NumUAVS'].astype(int)
-        df['TimeElapsed'] = df['TimeElapsed'].astype(float)
-
-        # Extract constant parameter values from the first run for the title and filename
-        battery_life = int(df['BatteryLife'].iloc[0])
-        lidar_dist = int(df['LIDARDistance'].iloc[0])
-        top_speed = df['TopSpeed'].iloc[0]
-        accel = df['Acceleration'].iloc[0]
+        # Extract constant parameter values from the first run using their exact column indices
+        # Index map from your save code:
+        # 0: NumUAVS, 1: TimeElapsed, 2: StartPosition, 3: ReleaseDelay, 
+        # 4: TopSpeed, 5: DangerSpeed, 6: StartSpeed, 7: LIDARDistance, 
+        # 8: BatteryLife, 9: Acceleration, 10: WallDangerZone, 11: ChargeTime
+        battery_life = int(float(df.iloc[0, 8]))
+        lidar_dist = int(float(df.iloc[0, 7]))
+        top_speed = float(df.iloc[0, 4])
+        accel = float(df.iloc[0, 9])
 
         # 2. Configure the plot
         plt.figure(figsize=(8, 5))
-        plt.plot(df['NumUAVS'], df['TimeElapsed'], marker='o', linewidth=2, color='#1f77b4', label='Simulation Time')
+        plt.plot(df[0], df[1], marker='o', linewidth=2, color='#1f77b4', label='Simulation Time')
 
         title_text = (
             f"Time Elapsed vs. Number of UAVs\n"
@@ -123,18 +197,65 @@ class DataProcessing:
         plt.title(title_text, fontsize=11, fontweight='bold', pad=12)
         plt.xlabel("Number of UAVs", fontsize=10)
         plt.ylabel("Time Elapsed (seconds)", fontsize=10)
-        plt.xticks(df['NumUAVS'])
+        plt.xticks(df[0])
         plt.grid(True, linestyle='--', alpha=0.6)
 
         # Annotate each point with its time elapsed
-        for x, y in zip(df['NumUAVS'], df['TimeElapsed']):
+        for x, y in zip(df[0], df[1]):
             plt.annotate(f"{y:.1f}s", (x, y), textcoords="offset points", xytext=(0, 10), ha='center', fontsize=9)
 
         plt.tight_layout()
 
         # 3. Save the plot using the dynamic parameter filename
         output_filename = f"sim_results_bat{battery_life}_lidar{lidar_dist}_speed{top_speed}.png"
-        plt.savefig(output_filename, dpi=300)
-        plt.show()
+        plt.savefig(output_filename, dpi=300, bbox_inches='tight')
+        # plt.show()
 
         print(f"Graph successfully saved as: {output_filename}")
+
+    def generate_overlap_visualizations(num_uavs, overlap_area, uav_params):
+        """
+        Generates:
+        1. The main overlap map with the requested metadata title.
+        2. An overlap frequency distribution graph.
+        """
+        
+        # 1. Extract required metadata safely from uav_params
+        battery_life = uav_params.get("BatteryLife", "Unknown")
+        # Determine communications status (either explicitly or from nesting)
+        comms_status = "Enabled" if "Communications" in uav_params and uav_params["Communications"] else "Disabled"
+        
+        # 2. Calculate Overlap Percentage 
+        # (Assuming overlap_area contains cell counts or frequency counts where > 1 means redundant coverage)
+        total_cells = overlap_area.size
+        overlapped_cells = np.sum(overlap_area > 1)
+        overlap_percentage = (overlapped_cells / total_cells) * 100 if total_cells > 0 else 0.0
+
+        # --- GRAPH 1: Spatial Overlap Map with Custom Title ---
+        plt.figure(figsize=(8, 6))
+        plt.imshow(overlap_area, cmap='viridis', origin='lower')
+        plt.colorbar(label='Coverage Count per Cell')
+        
+        # Construct the requested title dynamically
+        title_string = (
+            f"Redundancy Map | UAVs: {num_uavs} | Battery: {battery_life}s | "
+            f"Comms: {comms_status} | Overlap: {overlap_percentage:.2f}%"
+        )
+        plt.title(title_string, fontsize=10, wrap=True)
+        plt.xlabel("X Grid Index")
+        plt.ylabel("Y Grid Index")
+        plt.tight_layout()
+        plt.show()
+
+        # --- GRAPH 2: Overlap Frequency Distribution Graph ---
+        plt.figure(figsize=(8, 5))
+        # Flatten array to count occurrences of coverage frequencies (0 visits, 1 visit, 2+ visits, etc.)
+        unique_vals, counts = np.unique(overlap_area, return_counts=True)
+        
+        plt.bar(unique_vals, counts, color='teal', edgecolor='black', alpha=0.7)
+        plt.title(f"Overlap Frequency Distribution (UAVs: {num_uavs})", fontsize=12)
+        plt.xlabel("Number of UAV Visits per Cell (Coverage Frequency)", fontsize=10)
+        plt.ylabel("Number of Grid Cells", fontsize=10)
+        plt.grid(axis='y', linestyle='--', alpha=0.7)
+        plt.tight_layout()
+        plt.show()
