@@ -14,8 +14,9 @@ class DataProcessing:
     def __init__(self):
         print("Process Data")
 
-        # self.process_time_data()
-        self.process_overlap_data()
+        self.process_time_data()
+        # self.process_overlap_data()
+        
 
 
     # Okay this needs changing
@@ -168,50 +169,55 @@ class DataProcessing:
             print(f"Processed Run {row_idx+1} ({num_uavs} UAVs) -> Saved as: {output_filename}")
 
     def process_time_data(self):
-        csv_file_path = '/home/student36/Dissertation/AbstractModel/DissertationAbtractModel/dissertation_time_record_DJI_full_comms.csv'
-        # Read headerless CSV; pandas assigns integer columns 0, 1, 2... automatically
-        df = pd.read_csv(csv_file_path, header=None)
+        csv_start_filepath = '/home/student36/Dissertation/AbstractModel/DissertationAbtractModel/NewSavedData/dissertation_time_record'
+        algorithm_names = ["Utility", "ClosestFrontier", "WaveFront"]
+        agent_names = ["DJI", "Elios"]
+        comms = ["no_comms", "comms"]
+        num_uavs = [1, 2, 3, 4, 5]
 
-        # Ensure proper numeric data types using integer column indices
-        df[0] = df[0].astype(int)     # NumUAVS (Column 0)
-        df[1] = df[1].astype(float)   # TimeElapsed (Column 1)
+        for algorithm in algorithm_names:
+            for agent in agent_names:
+                for comm in comms:
+                    # data_frames = []
+                    # data_frame_params = []
+                    x_nums = []
+                    y_times = []
+                    for num in num_uavs:
+                        csv_file_path = csv_start_filepath + f"_{algorithm}_{comm}_{agent}_{str(num)}.csv"
+                        df = pd.read_csv(csv_file_path, header=None)
+                        mins = round(df[1] / 60, 0)
+                        # data_frame_params.append([mins, num])
+                        x_nums.append(num)
+                        y_times.append(mins)
 
-        # Extract constant parameter values from the first run using their exact column indices
-        # Index map from your save code:
-        # 0: NumUAVS, 1: TimeElapsed, 2: StartPosition, 3: ReleaseDelay, 
-        # 4: TopSpeed, 5: DangerSpeed, 6: StartSpeed, 7: LIDARDistance, 
-        # 8: BatteryLife, 9: Acceleration, 10: WallDangerZone, 11: ChargeTime
-        battery_life = int(float(df.iloc[0, 8]))
-        lidar_dist = int(float(df.iloc[0, 7]))
-        top_speed = float(df.iloc[0, 4])
-        accel = float(df.iloc[0, 9])
+                    # 2. Configure the plot
+                    plt.figure(figsize=(8, 5))
+                    plt.plot(x_nums, y_times, marker='o', linewidth=2, color='#1f77b4', label='Simulation Time')
 
-        # 2. Configure the plot
-        plt.figure(figsize=(8, 5))
-        plt.plot(df[0], df[1], marker='o', linewidth=2, color='#1f77b4', label='Simulation Time')
+                    comm_string = "Comms Enabled" if comm == "comms" else "Comms Not Enabled"
 
-        title_text = (
-            f"Time Elapsed vs. Number of UAVs\n"
-            f"(Battery Life: {battery_life}s, LIDAR: {lidar_dist}m, Speed: {top_speed}m/s, Accel: {accel}m/s²)"
-        )
-        plt.title(title_text, fontsize=11, fontweight='bold', pad=12)
-        plt.xlabel("Number of UAVs", fontsize=10)
-        plt.ylabel("Time Elapsed (seconds)", fontsize=10)
-        plt.xticks(df[0])
-        plt.grid(True, linestyle='--', alpha=0.6)
+                    title_text = (
+                        f"Time Elapsed vs. Number of UAVs Abstract\n"
+                        f"(Algorithm: {algorithm}, Drone: {agent}, comm: {comm_string})"
+                    )
+                    plt.title(title_text, fontsize=11, fontweight='bold', pad=12)
+                    plt.xlabel("Number of UAVs", fontsize=10)
+                    plt.ylabel("Time Elapsed (minutes)", fontsize=10)
+                    plt.xticks(num_uavs)
+                    plt.grid(True, linestyle='--', alpha=0.6)
 
-        # Annotate each point with its time elapsed
-        for x, y in zip(df[0], df[1]):
-            plt.annotate(f"{y:.1f}s", (x, y), textcoords="offset points", xytext=(0, 10), ha='center', fontsize=9)
+                    # Annotate each point with its time elapsed
+                    for x, y in zip(df[0], df[1]):
+                        plt.annotate(f"{y:.1f}s", (x, y), textcoords="offset points", xytext=(0, 10), ha='center', fontsize=9)
 
-        plt.tight_layout()
+                    plt.tight_layout()
 
-        # 3. Save the plot using the dynamic parameter filename
-        output_filename = f"sim_results_bat{battery_life}_lidar{lidar_dist}_speed{top_speed}.png"
-        plt.savefig(output_filename, dpi=300, bbox_inches='tight')
-        # plt.show()
+                    # 3. Save the plot using the dynamic parameter filename
+                    output_filename = f"Time Elapsed Graphs/sim_results_{algorithm}_{agent}_{comms}.png"
+                    plt.savefig(output_filename, dpi=300, bbox_inches='tight')
+                    # plt.show()
 
-        print(f"Graph successfully saved as: {output_filename}")
+                    # print(f"Graph successfully saved as: {output_filename}")
 
     def generate_overlap_visualizations(num_uavs, overlap_area, uav_params):
         """
