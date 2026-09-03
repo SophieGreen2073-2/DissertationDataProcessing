@@ -16,7 +16,206 @@ class DataProcessing:
 
         # self.process_time_data()
         self.process_overlap_data()
+        # self.generate_annotated_scenario_map()
+
+
+    def generate_annotated_scenario_map(self):
+    # ==========================================
+        # CONFIGURATION FOR A SINGLE FILE
+        # ==========================================
+        algorithm = "Utility"
+        agent = "DJI"
+        comm = "comms"
+        num = 4
         
+        csv_start_filepath = '/home/student36/Dissertation/AbstractModel/DissertationAbtractModel/NewSavedData/dissertation_redundancy_record_'
+        csv_file_path = f"{csv_start_filepath}{algorithm}_{comm}_{agent}_{num}.csv"
+
+        # ==========================================
+        # LOAD LAYOUT FROM AreaLayout.JSON
+        # ==========================================
+        current_dir = os.path.dirname(__file__) if '__file__' in locals() else '.'
+        json_path = os.path.join(current_dir, 'AreaLayout.JSON')
+        
+        if not os.path.exists(json_path):
+            json_path = '/home/student36/Dissertation/AbstractModel/DissertationAbtractModel/AreaLayout.JSON'
+
+        with open(json_path) as f:
+            layout_data = json.load(f)
+
+        HEIGHT = int(layout_data["fullarea"]["height"])
+        WIDTH = int(layout_data["fullarea"]["width"])
+
+        # Read the CSV file
+        if not os.path.exists(csv_file_path):
+            print(f"Error: File not found -> {csv_file_path}")
+            return
+
+        with open(csv_file_path, 'r') as f:
+            lines = f.readlines()
+
+        for line in lines:
+            row = line.strip().split(',')
+            if not row or row[0] == '':
+                continue
+                
+            array_length = HEIGHT * WIDTH * num
+            array_data = np.array(row[1 : 1 + array_length], dtype=float)
+            overlap_area = array_data.reshape((HEIGHT, WIDTH, num))
+            break
+        else:
+            print("No valid data rows found in the CSV.")
+            return
+
+        # ==========================================
+        # REDUNDANCY METRICS
+        # ==========================================
+        total_scans = np.sum(overlap_area, axis=2)
+        unique_uavs_per_cell = np.sum((overlap_area > 0).astype(int), axis=2)
+        
+        mapped_cells = np.count_nonzero(total_scans)
+        cross_uav_cells = np.count_nonzero(unique_uavs_per_cell > 1)
+        cross_uav_percent = (cross_uav_cells / mapped_cells) * 100 if mapped_cells > 0 else 0
+
+        # ==========================================
+        # PLOTTING & ANNOTATING
+        # ==========================================
+        fig, ax = plt.subplots(figsize=(16, 7))
+
+        ax.set_title(
+            "Operational Scenario & Environment Constraints (Cross-UAV Scan Redundancy)",
+            fontsize=12, fontweight='bold', pad=15
+        )
+        
+        # Discrete Color Mapping
+        max_uavs_in_grid = max(int(np.max(unique_uavs_per_cell)), num)
+        cmap = plt.get_cmap('YlOrRd', max_uavs_in_grid + 1)
+        bounds = np.arange(-0.5, max_uavs_in_grid + 1.5, 1)
+        norm = BoundaryNorm(bounds, cmap.N)
+        
+        im = ax.imshow(unique_uavs_per_cell, cmap=cmap, norm=norm, aspect='equal', origin='upper')
+
+        # Add Colorbar
+        cbar = plt.colorbar(im, ax=ax, fraction=0.025, pad=0.04, ticks=np.arange(0, max_uavs_in_grid + 1))
+        cbar.set_label('Number of Unique Scanning Agents', rotation=270, labelpad=15)
+
+        # ==========================================
+        # OVERLAY WALLS & DOORS IN THICK BLACK FROM JSON
+        # ==========================================
+        doors_set = set(tuple(d) for d in layout_data["doors"])
+        for wall in layout_data["walls"]:
+            x_start, x_end = min(wall["start"][0], wall["end"][0]), max(wall["start"][0], wall["end"][0])
+            y_start, y_end = min(wall["start"][1], wall["end"][1]), max(wall["start"][1], wall["end"][1])
+            
+            if x_start == x_end:  # Vertical wall
+                x = x_start
+                ymin, ymax = y_start, y_end
+                segment_doors = sorted([y for (dx, y) in doors_set if dx == x and ymin <= y <= ymax])
+                
+                current_y = ymin
+                for dy in segment_doors:
+                    if dy > current_y:
+                        ax.plot([x, x], [current_y, dy], color='black', linewidth=3.0, zorder=4)
+                    current_y = dy + 1
+                if current_y <= ymax:
+                    ax.plot([x, x], [current_y, ymax], color='black', linewidth=3.0, zorder=4)
+                    
+            elif y_start == y_end:  # Horizontal wall
+                y = y_start
+                xmin, xmax = x_start, x_end
+                segment_doors = sorted([x for (x, dy) in doors_set if dy == y and xmin <= x <= xmax])
+                
+                current_x = xmin
+                for dx in segment_doors:
+                    if dx > current_x:
+                        ax.plot([current_x, dx], [y, y], color='black', linewidth=3.0, zorder=4)
+                    current_x = dx + 1
+                if current_x <= xmax:
+                    ax.plot([current_x, xmax], [y, y], color='black', linewidth=3.0, zorder=4)
+
+        # ==========================================
+        # ANNOTATIONS FOR SCENARIO CONSTRAINTS
+        # ==========================================
+        box_style = dict(boxstyle='round,pad=0.4', facecolor='white', edgecolor='black', alpha=0.85, lw=1)
+
+        # 1. Start Location [1, 1]
+        ax.plot(1, 1, marker='X', color='cyan', markersize=12, markeredgecolor='black', markeredgewidth=1.5, zorder=6)
+        ax.annotate(
+            "Start Position and Recharge Position [1,1]\n(High Initial Redundancy)",
+            xy=(1, 1), xytext=(15, 8),
+            arrowprops=dict(facecolor='black', arrowstyle='->', lw=1.5),
+            fontsize=9, fontweight='bold', color='darkblue',
+            bbox=box_style, zorder=7
+        )
+
+        # 2. Doorway Sensor Overlap (Example Doorway)
+        ax.plot(114, 21, marker='o', color='orange', markersize=8, markeredgecolor='black', zorder=6)
+        ax.annotate(
+            "Doorway Beam Spillage:\nSensors scan rooms while passing",
+            xy=(114, 21), xytext=(100, 32),
+            arrowprops=dict(facecolor='black', arrowstyle='->', lw=1.5),
+            fontsize=9, fontweight='bold', color='darkorange',
+            bbox=box_style, zorder=7
+        )
+
+        # 3. Unscannable Bottom-Right Corner (X: 149 to 195, Y: 49 to 55)
+        rect_width = 195 - 149  
+        rect_height = 55 - 48
+        rect_dead = mpatches.Rectangle(
+            (149, 48), rect_width, rect_height, 
+            linewidth=2, edgecolor='red', linestyle='--', 
+            facecolor='black', alpha=0.3, zorder=5
+        )
+        ax.add_patch(rect_dead)
+        
+        ax.annotate(
+            "Unscannable Corner\n(Physically Inaccessible)",
+            xy=(172, 52), xytext=(130, 38),
+            arrowprops=dict(facecolor='black', arrowstyle='->', lw=1.5),
+            fontsize=9, fontweight='bold', color='darkred',
+            bbox=box_style, zorder=7
+        )
+
+        # 4. Long Corridors (Recharge Path Re-scans) - Point shifted 15 spaces left
+        ax.annotate(
+            "Corridor Bottlenecks:\nRecharging forces return path re-scans",
+            xy=(70, 25), xytext=(46, 16),
+            arrowprops=dict(facecolor='black', arrowstyle='->', lw=1.5),
+            fontsize=9, fontweight='bold', color='black',
+            bbox=box_style, zorder=7
+        )
+
+        # ==========================================
+        # RE-ADD THE LEGEND
+        # ==========================================
+        # legend_handles = []
+        # for i in range(max_uavs_in_grid + 1):
+        #     color = cmap(norm(i))
+        #     label = f"{i} UAV{'s' if i != 1 else ''}"
+        #     legend_handles.append(mpatches.Patch(color=color, label=label, edgecolor='gray', linewidth=0.5))
+
+        # start_handle = mlines.Line2D([], [], color='cyan', marker='X', linestyle='None',
+        #                             markersize=8, markeredgecolor='black', markeredgewidth=1,
+        #                             label='Start Position [1, 1]')
+        # legend_handles.append(start_handle)
+
+        # ax.legend(handles=legend_handles, bbox_to_anchor=(1.01, 1), loc='upper left', fontsize=8, frameon=True)
+
+        # Axis settings
+        ax.set_xlim(0, WIDTH)
+        ax.set_ylim(HEIGHT, 0)  # Top-left origin format
+        ax.set_xlabel("X Coordinate (Grid Columns)", fontsize=10)
+        ax.set_ylabel("Y Coordinate (Grid Rows)", fontsize=10)
+
+        plt.tight_layout()
+
+        # Save annotated chart (bbox_inches='tight' prevents the side legend from cutting off)
+        output_dir = 'OverlapScanningGraphs'
+        os.makedirs(output_dir, exist_ok=True)
+        output_filename = os.path.join(output_dir, f'annotated_environment_scenario_{num}uavs.png')
+        plt.savefig(output_filename, dpi=300, bbox_inches='tight')
+        plt.show()
+        print(f"Annotated map successfully saved as: {output_filename}")
 
     # Okay this needs changing
     # Need to have two graphs made, one for each sim and line/bar for the overlap across them all
@@ -50,140 +249,9 @@ class DataProcessing:
                     x_num = []
                     y_redundancy = []
                     for num in num_uavs:
-                        csv_file_path = csv_start_filepath + f"{algorithm}_{comm}_{agent}_{str(num)}.csv"
-                                                
-                        # Read CSV without a fixed column count (handles varying row lengths)
-                        with open(csv_file_path, 'r') as f:
-                            lines = f.readlines()
-
-                        # Loop through each run/row in the file
-                        for row_idx, line in enumerate(lines):
-                            row = line.strip().split(',')
-                            if not row or row[0] == '':
-                                continue
-                                
-                            # num_uavs = int(row[0])
-                            array_length = HEIGHT * WIDTH * num
-                            array_data = np.array(row[1 : 1 + array_length], dtype=float)
-                            overlap_area = array_data.reshape((HEIGHT, WIDTH, num))
-                            
-                            # uav_params_raw = row[1 + array_length :]
-                            
-                            # top_speed = uav_params_raw[2]
-                            # lidar_dist = int(float(uav_params_raw[5]))
-                            # battery_life = int(float(uav_params_raw[6]))
-                            # accel = uav_params_raw[7]
-                            
-                            # ==========================================
-                            # REDUNDANCY METRICS
-                            # ==========================================
-                            total_scans = np.sum(overlap_area, axis=2)
-                            unique_uavs_per_cell = np.sum((overlap_area > 0).astype(int), axis=2)
-                            
-                            mapped_cells = np.count_nonzero(total_scans)
-                            cross_uav_cells = np.count_nonzero(unique_uavs_per_cell > 1)
-                            
-                            global_redundancy_ratio = np.sum(total_scans) / mapped_cells if mapped_cells > 0 else 0
-                            cross_uav_percent = (cross_uav_cells / mapped_cells) * 100 if mapped_cells > 0 else 0
-
-                            x_num.append(num)
-                            y_redundancy.append(cross_uav_percent)
-                            
-                            # ==========================================
-                            # PLOTTING & DYNAMIC SAVING (Single Plot)
-                            # ==========================================
-                            fig, ax = plt.subplots(figsize=(14, 5))
-
-                            comm_string = "Comms Enabled" if comm == "comms" else "Comms Not Enabled"
-                            
-                            title_text = (
-                                f"Cross-UAV Overlap Analysis ({num} UAVs)\n"
-                                f"(Algorithm: {algorithm}, Drone: {agent}, comms: {comm_string})\n"
-                                f"Shared Coverage: {cross_uav_percent:.1f}%"
-                                # f"Global Redundancy Ratio: {global_redundancy_ratio:.2f}x | Shared Coverage: {cross_uav_percent:.1f}%"
-                            )
-                            ax.set_title(title_text, fontsize=10, fontweight='bold', pad=12)
-                            
-                            # ==========================================
-                            # DISCRETE COLOR MAPPING
-                            # ==========================================
-                            max_uavs_in_grid = max(int(np.max(unique_uavs_per_cell)), num)
-                            
-                            cmap = plt.get_cmap('YlOrRd', max_uavs_in_grid + 1)
-                            bounds = np.arange(-0.5, max_uavs_in_grid + 1.5, 1)
-                            norm = BoundaryNorm(bounds, cmap.N)
-                            
-                            im = ax.imshow(unique_uavs_per_cell, cmap=cmap, norm=norm, aspect='equal')
-                            
-                            # ==========================================
-                            # OVERLAY WALLS & DOORS IN BLACK FROM JSON
-                            # ==========================================
-                            doors_set = set(tuple(d) for d in layout_data["doors"])
-                            for wall in layout_data["walls"]:
-                                x_start, x_end = min(wall["start"][0], wall["end"][0]), max(wall["start"][0], wall["end"][0])
-                                y_start, y_end = min(wall["start"][1], wall["end"][1]), max(wall["start"][1], wall["end"][1])
-                                
-                                if x_start == x_end:  # Vertical wall
-                                    x = x_start
-                                    ymin, ymax = y_start, y_end
-                                    segment_doors = sorted([y for (dx, y) in doors_set if dx == x and ymin <= y <= ymax])
-                                    
-                                    current_y = ymin
-                                    for dy in segment_doors:
-                                        if dy > current_y:
-                                            ax.plot([x, x], [current_y, dy], color='black', linewidth=1.5)
-                                        current_y = dy + 1
-                                    if current_y <= ymax:
-                                        ax.plot([x, x], [current_y, ymax], color='black', linewidth=1.5)
-                                        
-                                elif y_start == y_end:  # Horizontal wall
-                                    y = y_start
-                                    xmin, xmax = x_start, x_end
-                                    segment_doors = sorted([x for (x, dy) in doors_set if dy == y and xmin <= x <= xmax])
-                                    
-                                    current_x = xmin
-                                    for dx in segment_doors:
-                                        if dx > current_x:
-                                            ax.plot([current_x, dx], [y, y], color='black', linewidth=1.5)
-                                        current_x = dx + 1
-                                    if current_x <= xmax:
-                                        ax.plot([current_x, xmax], [y, y], color='black', linewidth=1.5)
-
-                            # ==========================================
-                            # HIGHLIGHT START POSITION [1, 1]
-                            # ==========================================
-                            ax.scatter([1], [1], color='cyan', marker='X', s=120, zorder=5, edgecolor='black', linewidth=1)
-
-                            # ==========================================
-                            # BUILD NORMAL DISCRETE LEGEND
-                            # ==========================================
-                            legend_handles = []
-                            for i in range(max_uavs_in_grid + 1):
-                                color = cmap(norm(i))
-                                label = f"{i} UAV{'s' if i != 1 else ''}"
-                                legend_handles.append(mpatches.Patch(color=color, label=label, edgecolor='gray', linewidth=0.5))
-
-                            start_handle = mlines.Line2D([], [], color='cyan', marker='X', linestyle='None',
-                                                        markersize=8, markeredgecolor='black', markeredgewidth=1,
-                                                        label='Start Position [1, 1]')
-                            legend_handles.append(start_handle)
-
-                            ax.legend(handles=legend_handles, bbox_to_anchor=(1.01, 1), loc='upper left', fontsize=8, frameon=True)
-
-                            ax.set_xlim(0, WIDTH)
-                            ax.set_ylim(HEIGHT, 0)  # Ensures proper top-down grid alignment matching array bounds
-                            ax.set_xlabel("X (Grid Columns)", fontsize=9)
-                            ax.set_ylabel("Y (Grid Rows)", fontsize=9)
-
-                            plt.tight_layout()
-                            
-                            # Save chart uniquely per run (bbox_inches='tight' ensures external legend isn't clipped)
-                            output_filename = f"OverlapScanningGraphs/UAV_overlap_grid_{algorithm}_{agent}_{comms}_{num}.png"
-                            plt.savefig(output_filename, dpi=300, bbox_inches='tight')
-                            # plt.close()
-                            # plt.show()
-                            
-                            # print(f"Processed Run {row_idx+1} ({num_uavs} UAVs) -> Saved as: {output_filename}")
+                        y_val = self.create_scan_graph(comm, algorithm, agent, csv_start_filepath, num, HEIGHT, WIDTH, layout_data)
+                        y_redundancy.append(y_val)
+                        x_num.append(num)
 
                     # 2. Configure the plot
                     plt.figure(figsize=(8, 5))
@@ -208,11 +276,141 @@ class DataProcessing:
                     plt.tight_layout()
 
                     # 3. Save the plot using the dynamic parameter filename
-                    output_filename = f"OverlapScanningGraphs/Cross_UAV_Percent_{algorithm}_{agent}_{comms}.png"
+                    output_filename = f"OverlapScanningGraphs/Cross_UAV_Percent_{algorithm}_{agent}_{comm}.png"
                     plt.savefig(output_filename, dpi=300, bbox_inches='tight')
                     # plt.show()
                         
+    def create_scan_graph(self, comm, algorithm, agent, csv_start_filepath, num, HEIGHT, WIDTH, layout_data):
+        csv_file_path = csv_start_filepath + f"{algorithm}_{comm}_{agent}_{str(num)}.csv"
+                                                        
+        # Read CSV without a fixed column count (handles varying row lengths)
+        with open(csv_file_path, 'r') as f:
+            lines = f.readlines()
+
+        # Loop through each run/row in the file
+        for row_idx, line in enumerate(lines):
+            row = line.strip().split(',')
+            if not row or row[0] == '':
+                continue
+                
+            # num_uavs = int(row[0])
+            array_length = HEIGHT * WIDTH * num
+            array_data = np.array(row[1 : 1 + array_length], dtype=float)
+            overlap_area = array_data.reshape((HEIGHT, WIDTH, num))
+
+            
+            # ==========================================
+            # REDUNDANCY METRICS
+            # ==========================================
+            total_scans = np.sum(overlap_area, axis=2)
+            unique_uavs_per_cell = np.sum((overlap_area > 0).astype(int), axis=2)
+            
+            mapped_cells = np.count_nonzero(total_scans)
+            cross_uav_cells = np.count_nonzero(unique_uavs_per_cell > 1)
+            
+            global_redundancy_ratio = np.sum(total_scans) / mapped_cells if mapped_cells > 0 else 0
+            cross_uav_percent = (cross_uav_cells / mapped_cells) * 100 if mapped_cells > 0 else 0
+
+            # x_num.append(num)
+            # y_redundancy.append(cross_uav_percent)
+            
+            # ==========================================
+            # PLOTTING & DYNAMIC SAVING (Single Plot)
+            # ==========================================
+            fig, ax = plt.subplots(figsize=(14, 5))
+
+            comm_string = "Comms Enabled" if comm == "comms" else "Comms Not Enabled"
+            
+            title_text = (
+                f"Cross-UAV Overlap Analysis ({num} UAVs)\n"
+                f"(Algorithm: {algorithm}, Drone: {agent}, comms: {comm_string})\n"
+                f"Shared Coverage: {cross_uav_percent:.1f}%"
+                # f"Global Redundancy Ratio: {global_redundancy_ratio:.2f}x | Shared Coverage: {cross_uav_percent:.1f}%"
+            )
+            ax.set_title(title_text, fontsize=10, fontweight='bold', pad=12)
+            
+            # ==========================================
+            # DISCRETE COLOR MAPPING
+            # ==========================================
+            max_uavs_in_grid = max(int(np.max(unique_uavs_per_cell)), num)
+            
+            cmap = plt.get_cmap('YlOrRd', max_uavs_in_grid + 1)
+            bounds = np.arange(-0.5, max_uavs_in_grid + 1.5, 1)
+            norm = BoundaryNorm(bounds, cmap.N)
+            
+            im = ax.imshow(unique_uavs_per_cell, cmap=cmap, norm=norm, aspect='equal')
+            
+            # ==========================================
+            # OVERLAY WALLS & DOORS IN BLACK FROM JSON
+            # ==========================================
+            doors_set = set(tuple(d) for d in layout_data["doors"])
+            for wall in layout_data["walls"]:
+                x_start, x_end = min(wall["start"][0], wall["end"][0]), max(wall["start"][0], wall["end"][0])
+                y_start, y_end = min(wall["start"][1], wall["end"][1]), max(wall["start"][1], wall["end"][1])
+                
+                if x_start == x_end:  # Vertical wall
+                    x = x_start
+                    ymin, ymax = y_start, y_end
+                    segment_doors = sorted([y for (dx, y) in doors_set if dx == x and ymin <= y <= ymax])
+                    
+                    current_y = ymin
+                    for dy in segment_doors:
+                        if dy > current_y:
+                            ax.plot([x, x], [current_y, dy], color='black', linewidth=1.5)
+                        current_y = dy + 1
+                    if current_y <= ymax:
+                        ax.plot([x, x], [current_y, ymax], color='black', linewidth=1.5)
                         
+                elif y_start == y_end:  # Horizontal wall
+                    y = y_start
+                    xmin, xmax = x_start, x_end
+                    segment_doors = sorted([x for (x, dy) in doors_set if dy == y and xmin <= x <= xmax])
+                    
+                    current_x = xmin
+                    for dx in segment_doors:
+                        if dx > current_x:
+                            ax.plot([current_x, dx], [y, y], color='black', linewidth=1.5)
+                        current_x = dx + 1
+                    if current_x <= xmax:
+                        ax.plot([current_x, xmax], [y, y], color='black', linewidth=1.5)
+
+            # ==========================================
+            # HIGHLIGHT START POSITION [1, 1]
+            # ==========================================
+            ax.scatter([1], [1], color='cyan', marker='X', s=120, zorder=5, edgecolor='black', linewidth=1)
+
+            # ==========================================
+            # BUILD NORMAL DISCRETE LEGEND
+            # ==========================================
+            legend_handles = []
+            for i in range(max_uavs_in_grid + 1):
+                color = cmap(norm(i))
+                label = f"{i} UAV{'s' if i != 1 else ''}"
+                legend_handles.append(mpatches.Patch(color=color, label=label, edgecolor='gray', linewidth=0.5))
+
+            start_handle = mlines.Line2D([], [], color='cyan', marker='X', linestyle='None',
+                                        markersize=8, markeredgecolor='black', markeredgewidth=1,
+                                        label='Start Position [1, 1]')
+            legend_handles.append(start_handle)
+
+            ax.legend(handles=legend_handles, bbox_to_anchor=(1.01, 1), loc='upper left', fontsize=8, frameon=True)
+
+            ax.set_xlim(0, WIDTH)
+            ax.set_ylim(HEIGHT, 0)  # Ensures proper top-down grid alignment matching array bounds
+            ax.set_xlabel("X (Grid Columns)", fontsize=9)
+            ax.set_ylabel("Y (Grid Rows)", fontsize=9)
+
+            plt.tight_layout()
+            
+            # Save chart uniquely per run (bbox_inches='tight' ensures external legend isn't clipped)
+            output_filename = f"OverlapScanningGraphs/UAV_overlap_grid_{algorithm}_{agent}_{comm}_{num}.png"
+            plt.savefig(output_filename, dpi=300, bbox_inches='tight')
+            # plt.close()
+            # plt.show()
+
+            return cross_uav_percent
+            
+            # print(f"Processed Run {row_idx+1} ({num_uavs} UAVs) -> Saved as: {output_filename}")
 
     def process_time_data(self):
         csv_start_filepath = '/home/student36/Dissertation/AbstractModel/DissertationAbtractModel/NewSavedData/dissertation_time_record'
