@@ -243,9 +243,13 @@ class DataProcessing:
         HEIGHT = int(layout_data["fullarea"]["height"])
         WIDTH = int(layout_data["fullarea"]["width"])
 
-        for algorithm in algorithm_names:
-            for agent in agent_names:
-                for comm in comms:
+        # Loop through agents and comms on the outside so each combination gets 1 combined graph
+        for agent in agent_names:
+            for comm in comms:
+                plt.figure(figsize=(8, 5))
+
+                # Loop through each algorithm to draw all three lines on the same axes
+                for algorithm in algorithm_names:
                     x_num = []
                     y_redundancy = []
                     for num in num_uavs:
@@ -253,32 +257,31 @@ class DataProcessing:
                         y_redundancy.append(y_val)
                         x_num.append(num)
 
-                    # 2. Configure the plot
-                    plt.figure(figsize=(8, 5))
-                    plt.plot(x_num, y_redundancy, marker='o', linewidth=2, color='#1f77b4', label='Simulation Time')
+                    # Plot the line for this algorithm
+                    plt.plot(x_num, y_redundancy, marker='o', linewidth=2, label=algorithm)
 
-                    comm_string = "Comms Enabled" if comm == "comms" else "Comms Not Enabled"
+                # Configure the shared plot
+                comm_string = "Comms Enabled" if comm == "comms" else "Comms Not Enabled"
+                title_text = (
+                    f"Cross-UAV Overlap vs. Number of UAVs (Abstract)\n"
+                    f"(Drone: {agent}, Communication: {comm_string})"
+                )
+                plt.title(title_text, fontsize=11, fontweight='bold', pad=12)
+                plt.xlabel("Number of UAVs", fontsize=10)
+                plt.ylabel("Cross-UAV Overlap Percentage (%)", fontsize=10)
+                plt.xticks(num_uavs)
+                plt.grid(True, linestyle='--', alpha=0.6)
+                
+                # Add a legend to distinguish the algorithm lines
+                plt.legend(title="Algorithm", loc="best")
 
-                    title_text = (
-                        f"Cross-UAV Overlap vs. Number of UAVs Abstract\n"
-                        f"(Algorithm: {algorithm}, Drone: {agent}, comm: {comm_string})"
-                    )
-                    plt.title(title_text, fontsize=11, fontweight='bold', pad=12)
-                    plt.xlabel("Number of UAVs", fontsize=10)
-                    plt.ylabel("Time Elapsed (minutes)", fontsize=10)
-                    plt.xticks(num_uavs)
-                    plt.grid(True, linestyle='--', alpha=0.6)
+                plt.tight_layout()
 
-                    # Annotate each point with its time elapsed
-                    for x, y in zip(x_num, y_redundancy):
-                        plt.annotate(f"{y:.1f}%", (x, y), textcoords="offset points", xytext=(0, 10), ha='center', fontsize=9)
-
-                    plt.tight_layout()
-
-                    # 3. Save the plot using the dynamic parameter filename
-                    output_filename = f"OverlapScanningGraphs/Cross_UAV_Percent_{algorithm}_{agent}_{comm}.png"
-                    plt.savefig(output_filename, dpi=300, bbox_inches='tight')
-                    # plt.show()
+                # Save the combined plot and close the figure to free memory
+                output_filename = f"OverlapScanningGraphs/Cross_UAV_Percent_Comparison_{agent}_{comm}.png"
+                plt.savefig(output_filename, dpi=300, bbox_inches='tight')
+                # plt.show()
+                plt.close()
                         
     def create_scan_graph(self, comm, algorithm, agent, csv_start_filepath, num, HEIGHT, WIDTH, layout_data):
         csv_file_path = csv_start_filepath + f"{algorithm}_{comm}_{agent}_{str(num)}.csv"
@@ -317,96 +320,96 @@ class DataProcessing:
             # ==========================================
             # PLOTTING & DYNAMIC SAVING (Single Plot)
             # ==========================================
-            fig, ax = plt.subplots(figsize=(14, 5))
+            # fig, ax = plt.subplots(figsize=(14, 5))
 
-            comm_string = "Comms Enabled" if comm == "comms" else "Comms Not Enabled"
+            # comm_string = "Comms Enabled" if comm == "comms" else "Comms Not Enabled"
             
-            title_text = (
-                f"Cross-UAV Overlap Analysis ({num} UAVs)\n"
-                f"(Algorithm: {algorithm}, Drone: {agent}, comms: {comm_string})\n"
-                f"Shared Coverage: {cross_uav_percent:.1f}%"
-                # f"Global Redundancy Ratio: {global_redundancy_ratio:.2f}x | Shared Coverage: {cross_uav_percent:.1f}%"
-            )
-            ax.set_title(title_text, fontsize=10, fontweight='bold', pad=12)
+            # title_text = (
+            #     f"Cross-UAV Overlap Analysis ({num} UAVs)\n"
+            #     f"(Algorithm: {algorithm}, Drone: {agent}, comms: {comm_string})\n"
+            #     f"Shared Coverage: {cross_uav_percent:.1f}%"
+            #     # f"Global Redundancy Ratio: {global_redundancy_ratio:.2f}x | Shared Coverage: {cross_uav_percent:.1f}%"
+            # )
+            # ax.set_title(title_text, fontsize=10, fontweight='bold', pad=12)
             
-            # ==========================================
-            # DISCRETE COLOR MAPPING
-            # ==========================================
-            max_uavs_in_grid = max(int(np.max(unique_uavs_per_cell)), num)
+            # # ==========================================
+            # # DISCRETE COLOR MAPPING
+            # # ==========================================
+            # max_uavs_in_grid = max(int(np.max(unique_uavs_per_cell)), num)
             
-            cmap = plt.get_cmap('YlOrRd', max_uavs_in_grid + 1)
-            bounds = np.arange(-0.5, max_uavs_in_grid + 1.5, 1)
-            norm = BoundaryNorm(bounds, cmap.N)
+            # cmap = plt.get_cmap('YlOrRd', max_uavs_in_grid + 1)
+            # bounds = np.arange(-0.5, max_uavs_in_grid + 1.5, 1)
+            # norm = BoundaryNorm(bounds, cmap.N)
             
-            im = ax.imshow(unique_uavs_per_cell, cmap=cmap, norm=norm, aspect='equal')
+            # im = ax.imshow(unique_uavs_per_cell, cmap=cmap, norm=norm, aspect='equal')
             
-            # ==========================================
-            # OVERLAY WALLS & DOORS IN BLACK FROM JSON
-            # ==========================================
-            doors_set = set(tuple(d) for d in layout_data["doors"])
-            for wall in layout_data["walls"]:
-                x_start, x_end = min(wall["start"][0], wall["end"][0]), max(wall["start"][0], wall["end"][0])
-                y_start, y_end = min(wall["start"][1], wall["end"][1]), max(wall["start"][1], wall["end"][1])
+            # # ==========================================
+            # # OVERLAY WALLS & DOORS IN BLACK FROM JSON
+            # # ==========================================
+            # doors_set = set(tuple(d) for d in layout_data["doors"])
+            # for wall in layout_data["walls"]:
+            #     x_start, x_end = min(wall["start"][0], wall["end"][0]), max(wall["start"][0], wall["end"][0])
+            #     y_start, y_end = min(wall["start"][1], wall["end"][1]), max(wall["start"][1], wall["end"][1])
                 
-                if x_start == x_end:  # Vertical wall
-                    x = x_start
-                    ymin, ymax = y_start, y_end
-                    segment_doors = sorted([y for (dx, y) in doors_set if dx == x and ymin <= y <= ymax])
+            #     if x_start == x_end:  # Vertical wall
+            #         x = x_start
+            #         ymin, ymax = y_start, y_end
+            #         segment_doors = sorted([y for (dx, y) in doors_set if dx == x and ymin <= y <= ymax])
                     
-                    current_y = ymin
-                    for dy in segment_doors:
-                        if dy > current_y:
-                            ax.plot([x, x], [current_y, dy], color='black', linewidth=1.5)
-                        current_y = dy + 1
-                    if current_y <= ymax:
-                        ax.plot([x, x], [current_y, ymax], color='black', linewidth=1.5)
+            #         current_y = ymin
+            #         for dy in segment_doors:
+            #             if dy > current_y:
+            #                 ax.plot([x, x], [current_y, dy], color='black', linewidth=1.5)
+            #             current_y = dy + 1
+            #         if current_y <= ymax:
+            #             ax.plot([x, x], [current_y, ymax], color='black', linewidth=1.5)
                         
-                elif y_start == y_end:  # Horizontal wall
-                    y = y_start
-                    xmin, xmax = x_start, x_end
-                    segment_doors = sorted([x for (x, dy) in doors_set if dy == y and xmin <= x <= xmax])
+            #     elif y_start == y_end:  # Horizontal wall
+            #         y = y_start
+            #         xmin, xmax = x_start, x_end
+            #         segment_doors = sorted([x for (x, dy) in doors_set if dy == y and xmin <= x <= xmax])
                     
-                    current_x = xmin
-                    for dx in segment_doors:
-                        if dx > current_x:
-                            ax.plot([current_x, dx], [y, y], color='black', linewidth=1.5)
-                        current_x = dx + 1
-                    if current_x <= xmax:
-                        ax.plot([current_x, xmax], [y, y], color='black', linewidth=1.5)
+            #         current_x = xmin
+            #         for dx in segment_doors:
+            #             if dx > current_x:
+            #                 ax.plot([current_x, dx], [y, y], color='black', linewidth=1.5)
+            #             current_x = dx + 1
+            #         if current_x <= xmax:
+            #             ax.plot([current_x, xmax], [y, y], color='black', linewidth=1.5)
 
-            # ==========================================
-            # HIGHLIGHT START POSITION [1, 1]
-            # ==========================================
-            ax.scatter([1], [1], color='cyan', marker='X', s=120, zorder=5, edgecolor='black', linewidth=1)
+            # # ==========================================
+            # # HIGHLIGHT START POSITION [1, 1]
+            # # ==========================================
+            # ax.scatter([1], [1], color='cyan', marker='X', s=120, zorder=5, edgecolor='black', linewidth=1)
 
-            # ==========================================
-            # BUILD NORMAL DISCRETE LEGEND
-            # ==========================================
-            legend_handles = []
-            for i in range(max_uavs_in_grid + 1):
-                color = cmap(norm(i))
-                label = f"{i} UAV{'s' if i != 1 else ''}"
-                legend_handles.append(mpatches.Patch(color=color, label=label, edgecolor='gray', linewidth=0.5))
+            # # ==========================================
+            # # BUILD NORMAL DISCRETE LEGEND
+            # # ==========================================
+            # legend_handles = []
+            # for i in range(max_uavs_in_grid + 1):
+            #     color = cmap(norm(i))
+            #     label = f"{i} UAV{'s' if i != 1 else ''}"
+            #     legend_handles.append(mpatches.Patch(color=color, label=label, edgecolor='gray', linewidth=0.5))
 
-            start_handle = mlines.Line2D([], [], color='cyan', marker='X', linestyle='None',
-                                        markersize=8, markeredgecolor='black', markeredgewidth=1,
-                                        label='Start Position [1, 1]')
-            legend_handles.append(start_handle)
+            # start_handle = mlines.Line2D([], [], color='cyan', marker='X', linestyle='None',
+            #                             markersize=8, markeredgecolor='black', markeredgewidth=1,
+            #                             label='Start Position [1, 1]')
+            # legend_handles.append(start_handle)
 
-            ax.legend(handles=legend_handles, bbox_to_anchor=(1.01, 1), loc='upper left', fontsize=8, frameon=True)
+            # ax.legend(handles=legend_handles, bbox_to_anchor=(1.01, 1), loc='upper left', fontsize=8, frameon=True)
 
-            ax.set_xlim(0, WIDTH)
-            ax.set_ylim(HEIGHT, 0)  # Ensures proper top-down grid alignment matching array bounds
-            ax.set_xlabel("X (Grid Columns)", fontsize=9)
-            ax.set_ylabel("Y (Grid Rows)", fontsize=9)
+            # ax.set_xlim(0, WIDTH)
+            # ax.set_ylim(HEIGHT, 0)  # Ensures proper top-down grid alignment matching array bounds
+            # ax.set_xlabel("X (Grid Columns)", fontsize=9)
+            # ax.set_ylabel("Y (Grid Rows)", fontsize=9)
 
-            plt.tight_layout()
+            # plt.tight_layout()
             
-            # Save chart uniquely per run (bbox_inches='tight' ensures external legend isn't clipped)
-            output_filename = f"OverlapScanningGraphs/UAV_overlap_grid_{algorithm}_{agent}_{comm}_{num}.png"
-            plt.savefig(output_filename, dpi=300, bbox_inches='tight')
-            # plt.close()
-            # plt.show()
+            # # Save chart uniquely per run (bbox_inches='tight' ensures external legend isn't clipped)
+            # output_filename = f"OverlapScanningGraphs/UAV_overlap_grid_{algorithm}_{agent}_{comm}_{num}.png"
+            # plt.savefig(output_filename, dpi=300, bbox_inches='tight')
+            # # plt.close()
+            # # plt.show()
 
             return cross_uav_percent
             
@@ -419,11 +422,13 @@ class DataProcessing:
         comms = ["no_comms", "comms"]
         num_uavs = [1, 2, 3, 4, 5]
 
-        for algorithm in algorithm_names:
-            for agent in agent_names:
-                for comm in comms:
-                    # data_frames = []
-                    # data_frame_params = []
+        # Loop through agents and comms on the outside so each combination gets 1 graph
+        for agent in agent_names:
+            for comm in comms:
+                plt.figure(figsize=(8, 5))
+
+                # Loop through each algorithm to draw its line on the same graph
+                for algorithm in algorithm_names:
                     x_nums = []
                     y_times = []
                     for num in num_uavs:
@@ -431,38 +436,34 @@ class DataProcessing:
                         df = pd.read_csv(csv_file_path, header=None)
                         seconds = float(df.iloc[0, 1])
                         mins = round(seconds / 60, 1)
-                        # data_frame_params.append([mins, num])
                         x_nums.append(num)
                         y_times.append(mins)
 
-                    # 2. Configure the plot
-                    plt.figure(figsize=(8, 5))
-                    plt.plot(x_nums, y_times, marker='o', linewidth=2, color='#1f77b4', label='Simulation Time')
+                    # Plot the line for this algorithm
+                    plt.plot(x_nums, y_times, marker='o', linewidth=2, label=algorithm)
 
-                    comm_string = "Comms Enabled" if comm == "comms" else "Comms Not Enabled"
+                # Configure the shared plot
+                comm_string = "Comms Enabled" if comm == "comms" else "Comms Not Enabled"
+                title_text = (
+                    f"Time Elapsed vs. Number of UAVs (Abstract)\n"
+                    f"(Drone: {agent}, Communication: {comm_string})"
+                )
+                plt.title(title_text, fontsize=11, fontweight='bold', pad=12)
+                plt.xlabel("Number of UAVs", fontsize=10)
+                plt.ylabel("Time Elapsed (minutes)", fontsize=10)
+                plt.xticks(num_uavs)
+                plt.grid(True, linestyle='--', alpha=0.6)
+                
+                # Add a legend to distinguish the three algorithm lines
+                plt.legend(title="Algorithm", loc="best")
 
-                    title_text = (
-                        f"Time Elapsed vs. Number of UAVs Abstract\n"
-                        f"(Algorithm: {algorithm}, Drone: {agent}, comm: {comm_string})"
-                    )
-                    plt.title(title_text, fontsize=11, fontweight='bold', pad=12)
-                    plt.xlabel("Number of UAVs", fontsize=10)
-                    plt.ylabel("Time Elapsed (minutes)", fontsize=10)
-                    plt.xticks(num_uavs)
-                    plt.grid(True, linestyle='--', alpha=0.6)
+                plt.tight_layout()
 
-                    # Annotate each point with its time elapsed
-                    for x, y in zip(x_nums, y_times):
-                        plt.annotate(f"{y}m", (x, y), textcoords="offset points", xytext=(0, 10), ha='center', fontsize=9)
-
-                    plt.tight_layout()
-
-                    # 3. Save the plot using the dynamic parameter filename
-                    output_filename = f"TimeElapsedGraphs/Time_Elapsed_{algorithm}_{agent}_{comm}.png"
-                    plt.savefig(output_filename, dpi=300, bbox_inches='tight')
-                    # plt.show()
-
-                    # print(f"Graph successfully saved as: {output_filename}")
+                # Save the combined plot and close the figure to free memory
+                output_filename = f"TimeElapsedGraphs/Time_Elapsed_Comparison_{agent}_{comm}.png"
+                plt.savefig(output_filename, dpi=300, bbox_inches='tight')
+                # plt.show()
+                plt.close()
 
     def generate_overlap_visualizations(num_uavs, overlap_area, uav_params):
         """
